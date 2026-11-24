@@ -224,6 +224,24 @@ td.r-al,th.r-al{text-align:right}
 .sou-chq{margin-top:8px}
 .sou .actions{margin-top:12px}
 .sou > .link{margin-top:8px}
+.slip > div.tap{position:relative}
+.slip .tap dt button{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:4px;color:var(--ink);text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
+.slip .tap dt button::after{content:"";position:absolute;inset:0}
+.slip .tap dt button:focus-visible{outline:none}
+.slip > div.tap:has(button:focus-visible){outline:3px solid var(--focus);outline-offset:2px;border-radius:6px}
+.slip .tap dt button .i{width:16px;height:16px;color:var(--muted)}
+.sl-chips{margin:4px 0 10px}
+.chip small{font-weight:500;opacity:.75}
+.soul{list-style:none;margin:0;padding:0}
+.soul li{padding:11px 0;border-bottom:1px dashed var(--line)}
+.sl-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.sl-when{font-weight:700}
+.sl-top b{font-size:17px}
+.sl-what{color:var(--muted);margin-top:2px}
+.sl-what small{display:block;font-size:13px}
+.sl-act{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.sl-act span{font-size:13px;color:var(--muted)}
+.btn.btn-sm{min-height:36px;padding:0 14px;font-size:14px;flex:none}
 .dep div{min-width:0}
 .dep small{display:block;color:var(--muted)}
 .empty .steps{text-align:left;margin:4px auto 16px;max-width:30em;padding-left:1.3em;line-height:1.45}
@@ -726,9 +744,9 @@ function souchePanel() {
       <p class="sou-st ${stt.cls}">${stt.txt}</p>
       ${o.sales ? `<dl class="slip">
         <div class="tot"><dt>Encaissé</dt><dd>${eur(o.total, true)}</dd></div>
-        <div class="sub"><dt>Espèces <small>(${plural(o.espN, 'vente')})</small></dt><dd>${eur(o.esp, true)}</dd></div>
-        <div class="sub"><dt>Chèques <small>(${o.chqN})</small></dt><dd>${eur(o.chq, true)}</dd></div>
-        <div class="sub"><dt>CB <small>(${o.cbN})</small></dt><dd>${eur(o.cb, true)}</dd></div>
+        <div class="sub tap"><dt><button data-act="souList" data-v="${o.n}" data-pay="esp" aria-label="Voir les ventes en espèces de la souche ${o.n}">Espèces <small>(${plural(o.espN, 'vente')})</small>${icon('chev')}</button></dt><dd>${eur(o.esp, true)}</dd></div>
+        <div class="sub tap"><dt><button data-act="souList" data-v="${o.n}" data-pay="chq" aria-label="Voir les chèques de la souche ${o.n}">Chèques <small>(${o.chqN})</small>${icon('chev')}</button></dt><dd>${eur(o.chq, true)}</dd></div>
+        <div class="sub tap"><dt><button data-act="souList" data-v="${o.n}" data-pay="cb" aria-label="Voir les paiements CB de la souche ${o.n}">CB <small>(${o.cbN})</small>${icon('chev')}</button></dt><dd>${eur(o.cb, true)}</dd></div>
         ${o.exN ? `<div class="sub"><dt>dont hors tournée <small>(${plural(o.exCal, 'cal.', 'cal.')})</small></dt><dd>${eur(o.exSum, true)}</dd></div>` : ''}
         <div><dt>Moyenne par calendrier</dt><dd>${o.cal ? eur(o.total / o.cal, true) : '—'}</dd></div>
       </dl>
@@ -737,8 +755,48 @@ function souchePanel() {
       ${isCur && cur > 1 && !o.sales ? `<button class="link" data-act="backSouche">Revenir à la souche ${cur - 1}</button>` : ''}
     </article>`;
   }
-  h += `<p class="hint">Chaque vente notée va dans la souche en cours. Pour en déplacer une, ouvre sa fiche et choisis la souche. Taille des souches : onglet Secteur, rubrique Réglages.</p></section>`;
+  h += `<p class="hint">Touche Espèces, Chèques ou CB pour voir le détail des ventes et corriger un mode de paiement. Chaque vente notée va dans la souche en cours. Pour en déplacer une, ouvre sa fiche et choisis la souche. Taille des souches : onglet Secteur, rubrique Réglages.</p></section>`;
   return h;
+}
+function souSales(n, pay) {
+  const L = [];
+  for (const s of Object.values(S.streets)) for (const a of s.addrs)
+    if (a.st === 'pris' && souOf(a) === n && (a.pay || 'esp') === pay) L.push({sid: s.id, aid: a.id, t: a.t || 0, what: numLabel(a) + ' ' + s.name, k: +a.k || 1, a: +a.a || 0, note: a.note || ''});
+  for (const e of S.meta.extra)
+    if (souOf(e) === n && (e.pay || 'esp') === pay) L.push({ex: e.id, t: e.t || 0, what: (e.who || 'Hors tournée') + ' · hors tournée', k: +e.k || 1, a: +e.a || 0, note: e.note || ''});
+  return L.sort((x, y) => y.t - x.t);
+}
+const PAY_LIST = {esp: 'Espèces', chq: 'Chèques', cb: 'CB'}, PAY_TO = {esp: 'Espèces', chq: 'Chèque', cb: 'CB'};
+function souListSheet() {
+  const all = souSales(SH.n, SH.pay), amts = [...new Set(all.map(x => round2(x.a)))].sort((x, y) => x - y);
+  if (SH.amt !== 'all' && !amts.includes(+SH.amt)) SH.amt = 'all';
+  const L = SH.amt === 'all' ? all : all.filter(x => round2(x.a) === +SH.amt);
+  const sum = round2(all.reduce((t, x) => t + x.a, 0));
+  const when = t => t ? new Date(t).toLocaleString('fr-FR', {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : 'date inconnue';
+  const others = Object.keys(PAY_LIST).filter(k => k !== SH.pay);
+  let h = sheetTitle(`${PAY_LIST[SH.pay]} · souche ${SH.n}`, `${plural(all.length, 'vente')} · ${eur(sum, true)} · de la plus récente à la plus ancienne`);
+  if (amts.length > 1) h += `<div class="chips sl-chips" role="group" aria-label="Montant"><button class="chip" data-act="souAmt" data-v="all" aria-pressed="${SH.amt === 'all'}">Tous</button>${amts.map(v => `<button class="chip" data-act="souAmt" data-v="${v}" aria-pressed="${+SH.amt === v && SH.amt !== 'all'}">${eur(v, v % 1 !== 0)} <small>${all.filter(x => round2(x.a) === v).length}</small></button>`).join('')}</div>`;
+  h += L.length ? `<ul class="soul">${L.map(x => `<li>
+      <div class="sl-top"><span class="sl-when">${esc(when(x.t))}</span><b class="num">${eur(x.a, true)}</b></div>
+      <div class="sl-what">${esc(x.what)}${x.k > 1 ? ' · ' + x.k + ' calendriers' : ''}${x.note ? `<small>${esc(x.note)}</small>` : ''}</div>
+      <div class="sl-act"><span>Passer en</span>${others.map(k => `<button class="btn btn-sm" data-act="souPay" data-v="${k}" ${x.ex ? `data-ex="${x.ex}"` : `data-sid="${x.sid}" data-aid="${x.aid}"`}>${PAY_TO[k]}</button>`).join('')}</div>
+    </li>`).join('')}</ul>` : `<p class="hint">Aucune vente ${SH.pay === 'esp' ? 'en espèces' : SH.pay === 'chq' ? 'par chèque' : 'en CB'} dans cette souche.</p>`;
+  return h;
+}
+function souSetPay(sid, aid, exId, pay) {   // fix the way a sale was paid, keeping its time and its souche
+  const refresh = () => { render(); if (SH && SH.kind === 'souList') renderSheet(); };
+  let what, undo;
+  if (exId) {
+    const e = S.meta.extra.find(x => x.id === exId); if (!e) return;
+    const old = e.pay; e.pay = pay; touch('meta'); what = e.who || 'Vente hors tournée';
+    undo = () => { e.pay = old; touch('meta'); refresh(); };
+  } else {
+    const {s, a} = findAddr(sid, aid); if (!a) return;
+    const old = a.pay; a.pay = pay; touch('s_' + s.id); what = numLabel(a) + ' ' + s.name;
+    undo = () => { a.pay = old; touch('s_' + s.id); refresh(); };
+  }
+  refresh();
+  toast(`${what} : passé en ${pay === 'cb' ? 'CB' : pay === 'chq' ? 'chèque' : 'espèces'}`, undo);
 }
 function souSeg(act, cur) {   // souche picker in a sale's sheet
   const n = Math.max(souCount(), cur);
@@ -1917,6 +1975,8 @@ function renderSheet() {
       <div class="field"><label for="exNote">Note (facultatif)</label><input class="inp" id="exNote" placeholder="N° de chèque, à qui le donner…" value="${esc(SH.note || '')}"></div>
       <button class="btn btn-red btn-wide" data-act="exSave">${SH.id ? 'Enregistrer' : 'Ajouter la vente'}</button>
       ${SH.id ? `<div class="sh-foot"><button class="link" data-act="exDel" data-confirm="Confirmer la suppression">${icon('x')} Supprimer cette vente</button></div>` : ''}`;
+  } else if (SH.kind === 'souList') {
+    h = souListSheet();
   } else if (SH.kind === 'deposit') {
     h = sheetTitle('Remise au trésorier', 'Somme donnée en cours de campagne') +
       `<div class="field"><label for="depAmt">Montant (€)</label><input class="inp" id="depAmt" inputmode="decimal" placeholder="0"></div>
@@ -2369,6 +2429,9 @@ document.addEventListener('click', e => {
     }
     case 'setRule': S.meta.settings.rule = v; touch('meta'); render(); break;
     case 'copyRecap': copyText(recapText(), 'Récap copié : colle-le dans un message au trésorier'); break;
+    case 'souList': openSheet({kind: 'souList', n: +v, pay: b.dataset.pay, amt: 'all'}); break;
+    case 'souAmt': SH.amt = v; renderSheet(); break;
+    case 'souPay': souSetPay(sid, aid, b.dataset.ex, v); break;
     case 'copySouche': { const o = soucheStats().find(x => x.n === +v); if (o) copyText(soucheText(o), `Bilan de la souche ${o.n} copié`); break; }
     case 'closeSouche': confirmTap(b, () => {
       const was = souCur(); S.meta.settings.souche = was + 1; touch('meta'); render();
