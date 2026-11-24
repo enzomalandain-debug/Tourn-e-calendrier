@@ -206,6 +206,24 @@ th{font-size:12.5px;font-weight:600;color:var(--muted);text-align:left;padding:6
 td{padding:8px 4px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
 td.r-al,th.r-al{text-align:right}
 .dep{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line)}
+.sou{border:1px solid var(--line);border-radius:14px;padding:12px 14px 14px;margin-top:12px;background:var(--surface)}
+.sou.cur{border:2px solid var(--plate);padding:11px 13px 13px}
+.sou-head{display:flex;align-items:center;gap:8px}
+.sou-head h3{margin:0;font-family:var(--f-display);font-size:22px;font-weight:700;letter-spacing:.01em}
+.sou-tag{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:3px 8px;border-radius:99px;background:var(--no-bg);color:var(--no)}
+.sou-tag.now{background:var(--plate);color:var(--on-plate)}
+.sou-tag.done{background:var(--ok-bg);color:var(--ok)}
+.sou-cal{margin-left:auto;color:var(--muted);font-size:15px}
+.sou-cal b{color:var(--ink);font-size:20px}
+.sou-bar{height:8px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden;margin:10px 0 6px}
+.sou-bar i{display:block;height:100%;background:var(--plate)}
+.sou-st{margin:0 0 8px;font-size:14px;font-weight:600;color:var(--muted)}
+.sou-st.ok{color:var(--ok)}
+.sou-st.warn{color:var(--warn)}
+.sou .slip dt small{font-weight:400}
+.sou-chq{margin-top:8px}
+.sou .actions{margin-top:12px}
+.sou > .link{margin-top:8px}
 .dep div{min-width:0}
 .dep small{display:block;color:var(--muted)}
 .empty .steps{text-align:left;margin:4px auto 16px;max-width:30em;padding-left:1.3em;line-height:1.45}
@@ -457,7 +475,7 @@ const ST = {todo: 'À faire', pris: 'Pris', refus: 'Refus', absent: 'À repasser
 const SKIP_REASONS = ['Pas de démarchage', 'Logement vide', 'Déjà pris (collègue)', 'Commerce / bureau', 'Chien', 'Accès fermé'];
 const AMOUNTS = [5, 10, 15, 20, 30, 50];
 const DENOMS = [50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01];
-const DEF_SETTINGS = {campaign: 'Calendrier 2027', seller: '', commune: 'Montivilliers', stock: 0, float: 0, rule: 'all', perCal: 0, pct: 100};
+const DEF_SETTINGS = {campaign: 'Calendrier 2027', seller: '', commune: 'Montivilliers', stock: 0, float: 0, rule: 'all', perCal: 0, pct: 100, soucheSize: 50, souche: 1};
 
 const ICONS = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
@@ -649,6 +667,84 @@ function totals() {
   T.done = T.addr - T.todo;
   return T;
 }
+/* ---------- souches (books of calendars) ---------- */
+// every sale carries sc = the souche it was taken from; sales noted before souches existed belong to souche 1
+const souCur = () => Math.max(1, Math.floor(+S.meta.settings.souche || 1));
+const souSize = () => Math.max(1, Math.floor(+S.meta.settings.soucheSize || 50));
+const souOf = x => Math.max(1, Math.floor(+x.sc || 1));
+function souCount() {
+  const st = S.meta.settings; let n = Math.max(souCur(), st.stock ? Math.ceil(st.stock / souSize()) : 0);
+  for (const s of Object.values(S.streets)) for (const a of s.addrs) if (a.st === 'pris') n = Math.max(n, souOf(a));
+  for (const e of S.meta.extra) n = Math.max(n, souOf(e));
+  return n;
+}
+function soucheStats() {
+  const M = {};
+  const get = n => M[n] || (M[n] = {n, cal: 0, total: 0, sales: 0, esp: 0, espN: 0, chq: 0, chqN: 0, chqL: [], cb: 0, cbN: 0, exCal: 0, exSum: 0, exN: 0});
+  const add = (x, ex) => {
+    const o = get(souOf(x)), v = +x.a || 0, k = +x.k || 1;
+    o.cal += k; o.total += v; o.sales++;
+    if (x.pay === 'chq') { o.chq += v; o.chqN++; o.chqL.push(v); } else if (x.pay === 'cb') { o.cb += v; o.cbN++; } else { o.esp += v; o.espN++; }
+    if (ex) { o.exCal += k; o.exSum += v; o.exN++; }
+  };
+  for (const s of Object.values(S.streets)) for (const a of s.addrs) if (a.st === 'pris') add(a, false);
+  for (const e of S.meta.extra) add(e, true);
+  for (let n = 1; n <= souCur(); n++) get(n);
+  return Object.values(M).sort((a, b) => a.n - b.n).map(o => Object.assign(o, {total: round2(o.total), esp: round2(o.esp), chq: round2(o.chq), cb: round2(o.cb), exSum: round2(o.exSum)}));
+}
+const plural = (n, w, ws) => n + ' ' + (n > 1 ? (ws || w + 's') : w);
+function soucheState(o) {   // what to say about the count of calendars in a souche
+  const size = souSize(), cur = souCur(), d = o.cal - size;
+  if (o.n < cur) return d === 0 ? {cls: 'ok', txt: 'Compte juste : ' + size + ' calendriers'} : d < 0 ? {cls: 'warn', txt: plural(-d, 'calendrier') + ' pas noté' + (-d > 1 ? 's' : '') + ' (ou noté' + (-d > 1 ? 's' : '') + ' dans une autre souche)'} : {cls: 'warn', txt: plural(d, 'calendrier') + ' de trop : une vente est peut-être dans la mauvaise souche'};
+  if (o.n > cur) return {cls: 'warn', txt: 'Souche pas encore commencée'};
+  return d === 0 ? {cls: 'ok', txt: 'Souche complète : touche « Souche terminée »'} : d > 0 ? {cls: 'warn', txt: 'Dépassée de ' + plural(d, 'calendrier') + ' : as-tu commencé la souche suivante ?'} : {cls: '', txt: 'Reste ' + plural(-d, 'calendrier') + ' dans cette souche'};
+}
+function soucheText(o) {
+  const st = S.meta.settings, cur = souCur();
+  const L = [
+    `${st.campaign || 'Calendriers'}${st.seller ? ' · ' + st.seller : ''}`,
+    `Bilan de la souche ${o.n}${o.n < cur ? ' (terminée)' : o.n === cur ? ' (en cours)' : ''} · arrêté le ${new Date().toLocaleDateString('fr-FR', {day: 'numeric', month: 'long', year: 'numeric'})}`,
+    '',
+    `Calendriers : ${o.cal} / ${souSize()}`,
+    ...(o.exN ? [`  dont hors tournée : ${plural(o.exCal, 'calendrier')} pour ${eur(o.exSum, true)}`] : []),
+    `Encaissé : ${eur(o.total, true)}`,
+    `  Espèces : ${eur(o.esp, true)} (${plural(o.espN, 'vente')})`,
+    `  Chèques : ${o.chqN} pour ${eur(o.chq, true)}${o.chqN ? ' (' + o.chqL.map(v => eur(v, true)).join(' · ') + ')' : ''}`,
+    `  CB : ${o.cbN} pour ${eur(o.cb, true)}`,
+    `Moyenne : ${o.cal ? eur(o.total / o.cal, true) : '—'} par calendrier`
+  ];
+  return L.join('\n');
+}
+function souchePanel() {
+  const cur = souCur(), size = souSize(), nTot = souCount(), L = soucheStats().reverse();
+  let h = `<section class="panel" id="souches"><div class="panel-head"><h2>Bilan par souche</h2><span class="hint">Souche ${cur} en cours${nTot > 1 ? ' sur ' + nTot : ''}</span></div>`;
+  for (const o of L) {
+    const stt = soucheState(o), isCur = o.n === cur, pct = Math.min(100, Math.round(o.cal / size * 100));
+    h += `<article class="sou${isCur ? ' cur' : ''}" aria-label="Souche ${o.n}">
+      <div class="sou-head"><h3>Souche ${o.n}</h3><span class="sou-tag ${o.n < cur ? 'done' : isCur ? 'now' : ''}">${o.n < cur ? 'terminée' : isCur ? 'en cours' : 'à venir'}</span><span class="sou-cal num"><b>${o.cal}</b> / ${size}</span></div>
+      <div class="sou-bar"><i style="width:${pct}%"></i></div>
+      <p class="sou-st ${stt.cls}">${stt.txt}</p>
+      ${o.sales ? `<dl class="slip">
+        <div class="tot"><dt>Encaissé</dt><dd>${eur(o.total, true)}</dd></div>
+        <div class="sub"><dt>Espèces <small>(${plural(o.espN, 'vente')})</small></dt><dd>${eur(o.esp, true)}</dd></div>
+        <div class="sub"><dt>Chèques <small>(${o.chqN})</small></dt><dd>${eur(o.chq, true)}</dd></div>
+        <div class="sub"><dt>CB <small>(${o.cbN})</small></dt><dd>${eur(o.cb, true)}</dd></div>
+        ${o.exN ? `<div class="sub"><dt>dont hors tournée <small>(${plural(o.exCal, 'cal.', 'cal.')})</small></dt><dd>${eur(o.exSum, true)}</dd></div>` : ''}
+        <div><dt>Moyenne par calendrier</dt><dd>${o.cal ? eur(o.total / o.cal, true) : '—'}</dd></div>
+      </dl>
+      ${o.chqN ? `<p class="hint sou-chq">Montants des chèques : ${o.chqL.map(v => eur(v, true)).join(' · ')}</p>` : ''}` : ''}
+      <div class="actions">${o.sales ? `<button class="btn" data-act="copySouche" data-v="${o.n}">${icon('copy')} Copier le bilan</button>` : ''}${isCur ? `<button class="btn${o.cal >= size ? ' btn-red' : ''}" data-act="closeSouche" data-confirm="Confirmer : souche ${o.n} terminée">Souche ${o.n} terminée</button>` : ''}</div>
+      ${isCur && cur > 1 && !o.sales ? `<button class="link" data-act="backSouche">Revenir à la souche ${cur - 1}</button>` : ''}
+    </article>`;
+  }
+  h += `<p class="hint">Chaque vente notée va dans la souche en cours. Pour en déplacer une, ouvre sa fiche et choisis la souche. Taille des souches : onglet Secteur, rubrique Réglages.</p></section>`;
+  return h;
+}
+function souSeg(act, cur) {   // souche picker in a sale's sheet
+  const n = Math.max(souCount(), cur);
+  if (n < 2) return '';
+  return `<div class="field"><span class="lbl">Souche</span><div class="seg" role="group" aria-label="Souche">${Array.from({length: n}, (_, i) => i + 1).map(k => `<button data-act="${act}" data-v="${k}" aria-pressed="${cur === k}">${k}</button>`).join('')}</div></div>`;
+}
 function ruleText() {
   const st = S.meta.settings;
   if (st.rule === 'perCal') return eur(+st.perCal || 0, true) + ' par calendrier distribué';
@@ -813,6 +909,7 @@ function setAddr(sid, aid, patch, msg, bumpT, created) {
   const {s, a} = findAddr(sid, aid); if (!a) return;
   const before = JSON.parse(JSON.stringify(a));
   Object.assign(a, patch); if (bumpT !== false) a.t = now();
+  if (a.st !== 'pris') delete a.sc; else if (patch.sc == null && before.st !== 'pris') a.sc = souCur();
   skipped.delete(aid);
   touch('s_' + sid); render();
   if (msg) toast(msg, () => { const i = s.addrs.findIndex(x => x.id === aid); if (i >= 0) { if (created) s.addrs.splice(i, 1); else s.addrs[i] = before; touch('s_' + sid); render(); } });
@@ -1598,6 +1695,7 @@ function viewCaisse(T) {
   const handLbl = T.hand >= 0 ? 'Reste à remettre au trésorier' : 'Le trésorier te doit';
   h += `<section class="due" aria-label="${handLbl}"><span class="eyebrow">${handLbl}</span><span class="due-amt">${eur(Math.abs(T.hand), true)}</span>
     <p>À reverser : ${eur(T.due, true)} (${esc(ruleText())})${T.cb ? ' · déjà reçu par l’amicale en CB : ' + eur(T.cb, true) : ''}${T.paid ? ' · déjà remis : ' + eur(T.paid, true) : ''}</p></section>`;
+  h += souchePanel();
   h += `<section class="panel"><div class="panel-head"><h2>Bordereau</h2><span class="hint">${T.pris} foyer${T.pris > 1 ? 's' : ''}${T.extraN ? ' + ' + T.extraN + ' hors tournée' : ''}</span></div>
     <dl class="slip">
       <div class="tot"><dt>Encaissé</dt><dd>${eur(T.total, true)}</dd></div>
@@ -1716,6 +1814,10 @@ function viewSector(T) {
       <div class="field"><label for="setStock">Calendriers reçus</label><input class="inp" id="setStock" data-set="stock" data-int="1" inputmode="numeric" value="${st.stock || ''}" placeholder="0"></div>
       <div class="field"><label for="setFloat">Fond de caisse (€)</label><input class="inp" id="setFloat" data-set="float" data-num="1" inputmode="decimal" value="${st.float || ''}" placeholder="0"></div>
     </div>
+    <div class="row2">
+      <div class="field"><label for="setSouSize">Calendriers par souche</label><input class="inp" id="setSouSize" data-set="soucheSize" data-int="1" inputmode="numeric" value="${st.soucheSize || ''}" placeholder="50"></div>
+      <div class="field"><label for="setSouCur">Souche en cours</label><input class="inp" id="setSouCur" data-set="souche" data-int="1" inputmode="numeric" value="${souCur()}" placeholder="1"></div>
+    </div>
     <div class="field"><span class="lbl">Ce que tu reverses au trésorier</span>
       <div class="seg" role="group" aria-label="Règle de reversement">
         <button data-act="setRule" data-v="all" aria-pressed="${st.rule === 'all'}">Tout</button>
@@ -1776,7 +1878,7 @@ function renderSheet() {
     const d = SH.d;
     h = sheetTitle(esc(numLabel(a)) + ' · ' + esc(s.name), esc(communeOf(s)) + (sideOf(a) ? ' · côté ' + sideOf(a) : '')) +
       `<div class="stgrid" role="group" aria-label="Statut">${Object.keys(ST).map(k => `<button class="stb" data-act="dSt" data-v="${k}" aria-pressed="${d.st === k}">${ST[k]}</button>`).join('')}</div>`;
-    if (d.st === 'pris') h += `<div class="field"><label for="dAmt">Montant (€)</label><input class="inp" id="dAmt" inputmode="decimal" value="${d.a === '' ? '' : String(d.a).replace('.', ',')}"></div>` + payseg('dPay', d.pay) + stepper('dK', 'Calendriers', d.k);
+    if (d.st === 'pris') h += `<div class="field"><label for="dAmt">Montant (€)</label><input class="inp" id="dAmt" inputmode="decimal" value="${d.a === '' ? '' : String(d.a).replace('.', ',')}"></div>` + payseg('dPay', d.pay) + stepper('dK', 'Calendriers', d.k) + souSeg('dSc', d.sc);
     if (d.st === 'absent') h += stepper('dTries', 'Passages sans réponse', d.tries) + `<label class="chk"><input type="checkbox" id="dAvis" ${d.avis ? 'checked' : ''}> Avis de passage déposé</label>`;
     if (d.st === 'skip') h += `<div class="reasons">${SKIP_REASONS.map(r => `<button data-act="dWhy" data-v="${esc(r)}" aria-pressed="${d.why === r}">${esc(r)}</button>`).join('')}</div>`;
     h += `<div class="field"><label for="dNote">Note</label><input class="inp" id="dNote" value="${esc(d.note)}" placeholder="Repasser après 18 h, nom, chien…"></div>`;
@@ -1809,7 +1911,7 @@ function renderSheet() {
   } else if (SH.kind === 'extra') {
     h = sheetTitle(SH.id ? 'Modifier la vente' : 'Vente hors tournée', 'Collègues, famille, amis…') +
       `<div class="field"><label for="exWho">Pour qui</label><input class="inp" id="exWho" autocomplete="off" placeholder="ex : Collègues raffinerie, Moustapha…" value="${esc(SH.who || '')}"></div>` +
-      stepper('exK', 'Calendriers', SH.k) + payseg('exPay', SH.pay) +
+      stepper('exK', 'Calendriers', SH.k) + payseg('exPay', SH.pay) + souSeg('exSc', SH.sc) +
       `<div class="field"><label for="exAmt">Montant donné (€)</label><input class="inp" id="exAmt" inputmode="decimal" placeholder="0" value="${SH.a === '' || SH.a == null ? '' : String(SH.a).replace('.', ',')}"></div>
       <div class="amts">${AMOUNTS.map(v => `<button class="amt" data-act="exAmt" data-v="${v}">${v} €</button>`).join('')}</div>
       <div class="field"><label for="exNote">Note (facultatif)</label><input class="inp" id="exNote" placeholder="N° de chèque, à qui le donner…" value="${esc(SH.note || '')}"></div>
@@ -1924,19 +2026,21 @@ function recapText() {
   if (T.paid) L.push(`Déjà remis : ${eur(T.paid, true)}`);
   L.push(`${T.hand >= 0 ? 'Reste à remettre' : 'Le trésorier me doit'} : ${eur(Math.abs(T.hand), true)}`, '',
     `Portes : ${T.pris} pris · ${T.refus} refus · ${T.absent} absents · ${T.skip} non sonnées · ${T.todo} pas encore faites`);
+  const SO = soucheStats().filter(o => o.sales);
+  if (SO.length > 1 || souCur() > 1) { L.push('', 'Par souche :'); for (const o of SO) L.push(`  Souche ${o.n} : ${o.cal} cal. · ${eur(o.total, true)} (espèces ${eur(o.esp, true)} · ${o.chqN} chèque${o.chqN > 1 ? 's' : ''} ${eur(o.chq, true)} · CB ${eur(o.cb, true)})`); }
   return L.join('\n');
 }
 function csvText() {
   const q = v => { const s = String(v == null ? '' : v); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  const rows = [['Ordre', 'Rue', 'Numéro', 'Commune', 'Statut', 'Montant', 'Paiement', 'Calendriers', 'Passages sans réponse', 'Raison / note', 'Date']];
+  const rows = [['Ordre', 'Rue', 'Numéro', 'Commune', 'Statut', 'Montant', 'Paiement', 'Calendriers', 'Souche', 'Passages sans réponse', 'Raison / note', 'Date']];
   let i = 0;
   for (const s of orderedStreets()) for (const a of streetSeq(s)) {
     i++;
-    rows.push([i, s.name, numLabel(a), communeOf(s), ST[a.st], a.st === 'pris' ? String(round2(a.a)).replace('.', ',') : '', a.st === 'pris' ? PAY[a.pay] : '', a.st === 'pris' ? (a.k || 1) : '', a.tries || '', [a.why, a.note].filter(Boolean).join(' · '), a.t && a.st !== 'todo' ? new Date(a.t).toLocaleString('fr-FR') : '']);
+    rows.push([i, s.name, numLabel(a), communeOf(s), ST[a.st], a.st === 'pris' ? String(round2(a.a)).replace('.', ',') : '', a.st === 'pris' ? PAY[a.pay] : '', a.st === 'pris' ? (a.k || 1) : '', a.st === 'pris' ? souOf(a) : '', a.tries || '', [a.why, a.note].filter(Boolean).join(' · '), a.t && a.st !== 'todo' ? new Date(a.t).toLocaleString('fr-FR') : '']);
   }
   for (const e of S.meta.extra.slice().sort((x, y) => x.t - y.t)) {
     i++;
-    rows.push([i, 'Hors tournée', '', '', ST.pris, String(round2(+e.a || 0)).replace('.', ','), PAY[e.pay] || PAY.esp, +e.k || 1, '', [e.who, e.note].filter(Boolean).join(' · '), e.t ? new Date(e.t).toLocaleString('fr-FR') : '']);
+    rows.push([i, 'Hors tournée', '', '', ST.pris, String(round2(+e.a || 0)).replace('.', ','), PAY[e.pay] || PAY.esp, +e.k || 1, souOf(e), '', [e.who, e.note].filter(Boolean).join(' · '), e.t ? new Date(e.t).toLocaleString('fr-FR') : '']);
   }
   return '﻿' + rows.map(r => r.map(q).join(';')).join('\r\n');
 }
@@ -2184,11 +2288,12 @@ document.addEventListener('click', e => {
     }
     case 'editAddr': {
       const {a} = findAddr(sid, aid); if (!a) break;
-      openSheet({kind: 'addr', sid, aid, d: {st: a.st, a: a.st === 'pris' ? a.a : '', pay: a.pay || 'esp', k: +a.k || 1, tries: a.tries || 0, avis: !!a.avis, note: a.note || '', why: a.why || ''}});
+      openSheet({kind: 'addr', sid, aid, d: {st: a.st, a: a.st === 'pris' ? a.a : '', pay: a.pay || 'esp', k: +a.k || 1, sc: a.st === 'pris' ? souOf(a) : souCur(), tries: a.tries || 0, avis: !!a.avis, note: a.note || '', why: a.why || ''}});
       break;
     }
     case 'dSt': readDraft(); SH.d.st = v; if (v === 'absent' && !SH.d.tries) SH.d.tries = 1; renderSheet(); break;
     case 'dPay': readDraft(); SH.d.pay = v; renderSheet(); break;
+    case 'dSc': readDraft(); SH.d.sc = +v; renderSheet(); break;
     case 'dWhy': readDraft(); SH.d.why = v; renderSheet(); break;
     case 'dK': readDraft(); SH.d.k = Math.max(1, Math.min(20, SH.d.k + (+b.dataset.d))); renderSheet(); break;
     case 'dTries': readDraft(); SH.d.tries = Math.max(0, Math.min(20, SH.d.tries + (+b.dataset.d))); renderSheet(); break;
@@ -2196,7 +2301,7 @@ document.addEventListener('click', e => {
       readDraft();
       const d = SH.d, {a} = findAddr(SH.sid, SH.aid); if (!a) break;
       const patch = {st: d.st, note: d.note.trim()};
-      if (d.st === 'pris') { const val = parseAmt(d.a); if (!(val >= 0) || val > 5000) { toast('Indique un montant valide, par exemple 12,50.'); break; } Object.assign(patch, {a: round2(val), pay: d.pay, k: d.k}); }
+      if (d.st === 'pris') { const val = parseAmt(d.a); if (!(val >= 0) || val > 5000) { toast('Indique un montant valide, par exemple 12,50.'); break; } Object.assign(patch, {a: round2(val), pay: d.pay, k: d.k, sc: d.sc || souCur()}); }
       if (d.st === 'absent') Object.assign(patch, {tries: d.tries, avis: d.avis});
       if (d.st === 'skip') patch.why = d.why;
       const bump = a.st !== d.st || (d.st === 'absent' && a.tries !== d.tries);
@@ -2264,20 +2369,26 @@ document.addEventListener('click', e => {
     }
     case 'setRule': S.meta.settings.rule = v; touch('meta'); render(); break;
     case 'copyRecap': copyText(recapText(), 'Récap copié : colle-le dans un message au trésorier'); break;
+    case 'copySouche': { const o = soucheStats().find(x => x.n === +v); if (o) copyText(soucheText(o), `Bilan de la souche ${o.n} copié`); break; }
+    case 'closeSouche': confirmTap(b, () => {
+      const was = souCur(); S.meta.settings.souche = was + 1; touch('meta'); render();
+      toast(`Souche ${was} terminée · les ventes vont maintenant dans la souche ${was + 1}`, () => { S.meta.settings.souche = was; touch('meta'); render(); });
+    }); break;
+    case 'backSouche': { const was = souCur(); if (was > 1) { S.meta.settings.souche = was - 1; touch('meta'); render(); toast(`Retour à la souche ${was - 1}`); } break; }
     case 'exportCsv': saveFile(`tournee-calendriers-${today()}.csv`, csvText(), 'Export CSV enregistré'); break;
     case 'exportJson': saveFile(`tournee-${OFFLINE ? 'hors-reseau' : 'claude'}-${today()}-${new Date().toTimeString().slice(0, 5).replace(':', 'h')}.json`, JSON.stringify({app: 'tournee-calendriers', v: 1, from: OFFLINE ? 'offline' : 'claude', meta: S.meta, streets: S.streets}), 'Fichier de données enregistré'); break;
     case 'importJson': confirmTap(b, () => { P.importMode = 'replace'; $('#fileIn').click(); }); break;
     case 'mergeJson': P.importMode = 'merge'; $('#fileIn').click(); break;
     case 'addDeposit': openSheet({kind: 'deposit', type: 'esp'}); break;
-    case 'addExtra': openSheet({kind: 'extra', who: '', k: 1, pay: 'esp', a: '', note: ''}); break;
-    case 'editExtra': { const e = S.meta.extra.find(x => x.id === b.dataset.id); if (e) openSheet({kind: 'extra', id: e.id, who: e.who || '', k: +e.k || 1, pay: e.pay || 'esp', a: e.a, note: e.note || ''}); break; }
+    case 'addExtra': openSheet({kind: 'extra', who: '', k: 1, pay: 'esp', a: '', note: '', sc: souCur()}); break;
+    case 'editExtra': { const e = S.meta.extra.find(x => x.id === b.dataset.id); if (e) openSheet({kind: 'extra', id: e.id, who: e.who || '', k: +e.k || 1, pay: e.pay || 'esp', a: e.a, note: e.note || '', sc: souOf(e)}); break; }
     case 'exK': { SH.k = Math.max(1, Math.min(200, SH.k + (+b.dataset.d))); const o = $('#exKOut'); if (o) o.textContent = SH.k; break; }
-    case 'exPay': SH.who = $('#exWho').value; SH.a = $('#exAmt').value; SH.note = $('#exNote').value; SH.pay = v; renderSheet(); break;
+    case 'exPay': case 'exSc': SH.who = $('#exWho').value; SH.a = $('#exAmt').value; SH.note = $('#exNote').value; if (act === 'exPay') SH.pay = v; else SH.sc = +v; renderSheet(); break;
     case 'exAmt': { const f = $('#exAmt'); if (f) f.value = String(+v); break; }
     case 'exSave': {
       const raw = $('#exAmt').value.trim(), val = raw === '' ? NaN : parseAmt(raw);
       if (!(val >= 0) || val > 20000) { toast('Indique le montant donné, par exemple 20 (0 si offert).'); $('#exAmt').focus(); break; }
-      const rec = {who: cleanName($('#exWho').value) || 'Hors tournée', k: SH.k || 1, a: round2(val), pay: SH.pay || 'esp', note: $('#exNote').value.trim()};
+      const rec = {who: cleanName($('#exWho').value) || 'Hors tournée', k: SH.k || 1, a: round2(val), pay: SH.pay || 'esp', note: $('#exNote').value.trim(), sc: SH.sc || souCur()};
       if (SH.id) { const e = S.meta.extra.find(x => x.id === SH.id); if (e) Object.assign(e, rec); }
       else S.meta.extra.push(Object.assign({id: uid(), t: now()}, rec));
       const isNew = !SH.id;
@@ -2304,12 +2415,12 @@ document.addEventListener('click', e => {
       for (const s of Object.values(S.streets)) {
         for (const a of s.addrs) {
           a.prev = {c, st: a.st, a: a.a, k: a.k, why: a.why};
-          Object.assign(a, {st: 'todo', a: 0, pay: 'esp', k: 1, t: 0, tries: 0, avis: false, why: ''});
+          Object.assign(a, {st: 'todo', a: 0, pay: 'esp', k: 1, t: 0, tries: 0, avis: false, why: ''}); delete a.sc;
         }
         touch('s_' + s.id);
       }
       S.meta.settings.campaign = c.replace(/(\d{4})(?!.*\d{4})/, y => String(+y + 1));
-      S.meta.deposits = []; S.meta.extra = []; S.meta.cash = {}; S.meta.passStart = 0; touch('meta');
+      S.meta.deposits = []; S.meta.extra = []; S.meta.cash = {}; S.meta.passStart = 0; S.meta.settings.souche = 1; touch('meta');
       skipped.clear(); UI.pass = 'first'; UI.tab = 'tour'; saveUI(); render(); window.scrollTo(0, 0);
       toast('Nouvelle campagne prête');
     }); break;
